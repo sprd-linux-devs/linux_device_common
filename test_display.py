@@ -78,7 +78,7 @@ class DisplayTest(unittest.TestCase):
 
     def test_each_device_entry_invokes_shared_adapter(self):
         class ReachedDisplay(Exception): pass
-        for device in ['e5','t551m','m8']:
+        for device in ['t551m','m8']:
             with self.subTest(device=device):
                 script = TOP/f'device/linux_device_{device}/prepare-kernel.py'
                 module = runpy.run_path(str(script))
@@ -100,13 +100,32 @@ class DisplayTest(unittest.TestCase):
         runpy.run_path(str(TOP/'device/linux_device_m8/display.py'))['apply'](self.root)
         self.assertIn(NEW_MASK,(self.root/DRM).read_text())
 
-    def test_both_upstream_build_entries_patch_before_build(self):
-        for name, command in [('build.sh','python3 /policy/display.py .'),
-                              ('build-native.sh','python3 "$TOP/device/linux_device_common/kernel/display.py" .')]:
+    def test_e5_entry_verifies_shared_baseline_before_model_adapters(self):
+        script = TOP/'device/linux_device_e5/prepare-kernel.py'
+        module = runpy.run_path(str(script))
+        before = self.contents()
+        seen = []
+        class ReachedModelAdapter(Exception): pass
+        def bridge(path):
+            path = Path(path).resolve()
+            if path == (TOP/'upstream/check-kernel-source.py').resolve():
+                return {'check': lambda kernel, require_clean: seen.append((Path(kernel), require_clean))}
+            self.assertEqual(path, (TOP/'device/linux_device_common/kernel/charger.py').resolve())
+            raise ReachedModelAdapter()
+        with patch('runpy.run_path', side_effect=bridge):
+            with self.assertRaises(ReachedModelAdapter):
+                module['apply'](self.root)
+        self.assertEqual(seen, [(self.root, False)])
+        self.assertEqual(self.contents(), before)
+
+    def test_both_upstream_build_entries_check_committed_sources_before_build(self):
+        for name, command in [('build.sh','python3 /work/check-kernel-source.py .'),
+                              ('build-native.sh','python3 "$HERE/check-kernel-source.py" .')]:
             with self.subTest(name=name):
                 text = (TOP/'upstream'/name).read_text()
-                self.assertEqual(text.count(command),1)
                 self.assertLess(text.index(command),text.index('KV=$(make'))
+                self.assertNotIn('/kernel/display.py', text)
+                self.assertNotIn('/policy/display.py', text)
 
     def test_prepared_kernel_sources(self):
         if KERNEL is None: self.skipTest('pass --kernel to verify prepared kernel sources')

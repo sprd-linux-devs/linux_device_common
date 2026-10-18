@@ -9,7 +9,7 @@ import argparse, re, runpy, shutil, subprocess, tempfile
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('kernel',type=Path)
-parser.add_argument('--adapter',type=Path,default=Path(__file__).parent/'common/emmc.py')
+parser.add_argument('--adapter',type=Path,default=Path(__file__).parent/'kernel/emmc.py')
 parser.add_argument('--legacy-patch',type=Path,help='exercise the vendor 5.4 patch instead of the mainline adapter')
 args=parser.parse_args()
 if args.legacy_patch:

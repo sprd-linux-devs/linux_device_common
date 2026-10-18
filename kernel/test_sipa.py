@@ -11,7 +11,8 @@ import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parent
-apply = runpy.run_path(str(HERE/'sipa.py'))['apply']
+scope = runpy.run_path(str(HERE/'sipa.py'))
+apply = scope['apply']
 
 
 def function(source, name):
@@ -239,6 +240,13 @@ def main():
         # Upgrading them must produce exactly the same source as a clean build.
         for name,data in original.items():
             (root/name).write_bytes(data)
+        # The source revision may already contain the complete committed series.
+        # Reconstruct the pristine state before testing the historical first patch.
+        for current in reversed(scope['PATCHES']):
+            argv = ['git', 'apply', '--whitespace=nowarn', '--reverse']
+            if subprocess.run(argv + ['--check', str(current)], cwd=root,
+                              capture_output=True).returncode == 0:
+                subprocess.run(argv + [str(current)], cwd=root, check=True)
         subprocess.run(['git','apply','--whitespace=nowarn',str(patch)],cwd=root,check=True)
         previous_tx = (root/'drivers/unisoc_platform/net/sipa_v3/sipa_eth.c').read_text()
         apply(root)

@@ -94,11 +94,13 @@ int main(void) {
         memcpy(before,packet,sizeof(before));
         assert(sc2355_tx_special_data(&skb,&dev)==1 && commands==0);
         assert(skb.ip_summed==CHECKSUM_PARTIAL && !memcmp(before,packet,sizeof(before)));
-        // Preserve the pinned E5 driver's DNS command route in every mode.
+        // Preserve each profile's DNS policy and the STA command route.
         udp->source=udp->dest=htons(53);skb.ip_summed=CHECKSUM_NONE;commands=0;
-        int expected=1;
+        int expected=!(E5_AP_DNS_DATA && (mode==SPRD_MODE_AP || mode==SPRD_MODE_P2P_GO));
+        memcpy(before,packet,sizeof(before));
         assert(sc2355_tx_special_data(&skb,&dev)==(expected?NETDEV_TX_OK:1));
         assert(commands==expected);
+        if(!expected) assert(!memcmp(before,packet,sizeof(before)));
         // DHCPv4/v6 and VoWiFi remain commands for every mode/address class.
         udp->source=htons(ipv6?547:67);udp->dest=htons(ipv6?546:68);commands=0;
         assert(sc2355_tx_special_data(&skb,&dev)==NETDEV_TX_OK && commands==1);
@@ -107,6 +109,14 @@ int main(void) {
         vowifi_command=false;
         skb.protocol=htons(ETH_P_PAE);commands=0;
         assert(sc2355_tx_special_data(&skb,&dev)==NETDEV_TX_OK && commands==1);
+    }
+    // The mobile profile keeps AP/GO ARP off the firmware command queue too.
+    for(int mode=SPRD_MODE_AP;mode<=SPRD_MODE_STATION;mode++) {
+        memset(packet,0,sizeof(before));
+        eth->h_proto=skb.protocol=htons(ETH_P_ARP);vif.mode=mode;commands=0;
+        int expected=!(E5_AP_ARP_DATA && (mode==SPRD_MODE_AP || mode==SPRD_MODE_P2P_GO));
+        assert(sc2355_tx_special_data(&skb,&dev)==(expected?NETDEV_TX_OK:1));
+        assert(commands==expected);
     }
     // IPv6 ICMP and extension headers retain the data route without touching checksums.
     eth->h_proto=skb.protocol=htons(ETH_P_IPV6);eth->h_dest[0]=0x33;vif.mode=SPRD_MODE_AP;
@@ -146,7 +156,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix='e5-wifi-tx-') as directory:
         root = Path(directory)
         src = root/'test.c';binary=root/'test'
-        src.write_text(STUBS+'\n'.join(macros)+'\n'+udp+'\n'+body+MAIN)
+        profile = ('#define E5_AP_DNS_DATA ' + str(int('AP DNS uses the data queue' in text)) + '\n' +
+                   '#define E5_AP_ARP_DATA ' + str(int('AP ARP uses the data queue' in text)) + '\n')
+        src.write_text(profile+STUBS+'\n'.join(macros)+'\n'+udp+'\n'+body+MAIN)
         subprocess.run(['cc','-std=gnu11','-Wall','-Werror','-Wno-pointer-sign',
                         '-fsanitize=address,undefined','-fno-pie','-no-pie',str(src),'-o',str(binary)],check=True)
         subprocess.run([str(binary)],check=True)
